@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Which pages lose search visibility first? — A reviewer-prioritization model</title>
+<meta name="description" content="A Decision Tree model for ranking declining content pages, compared against a hand-written CTR-vs-position baseline on FlyRank's internship search warehouse.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #EFEEE6;
+    --bg-raised: #F8F7F1;
+    --ink: #1C1F1A;
+    --ink-soft: #4B5047;
+    --ink-faint: #7B8074;
+    --hairline: #D3D0C2;
+    --blue: #2E4C6D;
+    --amber: #A96E29;
+    --tag-bg: #E2DFD0;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #15171A;
+      --bg-raised: #1B1E21;
+      --ink: #E8E6DD;
+      --ink-soft: #B6B3A6;
+      --ink-faint: #82806F;
+      --hairline: #34372F;
+      --blue: #7FA3CC;
+      --amber: #D6A25C;
+      --tag-bg: #24261F;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171A;
+    --bg-raised: #1B1E21;
+    --ink: #E8E6DD;
+    --ink-soft: #B6B3A6;
+    --ink-faint: #82806F;
+    --hairline: #34372F;
+    --blue: #7FA3CC;
+    --amber: #D6A25C;
+    --tag-bg: #24261F;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+    line-height: 1.65;
+    font-size: 17px;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--blue); color: var(--bg-raised); }
+
+  a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { color: var(--amber); }
+
+  .wrap {
+    max-width: 700px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  header.hero {
+    border-bottom: 1px solid var(--hairline);
+    padding: 64px 0 40px;
+  }
+  .kicker {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--ink-faint);
+    margin: 0 0 18px;
+    letter-spacing: 0.02em;
+  }
+  h1 {
+    font-family: 'Newsreader', Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(30px, 5vw, 42px);
+    line-height: 1.18;
+    margin: 0 0 20px;
+    max-width: 18ch;
+  }
+  .byline {
+    font-size: 15px;
+    color: var(--ink-soft);
+    margin: 0;
+  }
+  .byline a { color: var(--ink-soft); }
+
+  section { padding: 44px 0; border-bottom: 1px solid var(--hairline); }
+  section:last-of-type { border-bottom: none; }
+
+  .sec-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-family: 'Newsreader', Georgia, serif;
+    font-weight: 600;
+    font-size: 26px;
+    margin: 0 0 20px;
+    line-height: 1.3;
+  }
+  p { margin: 0 0 16px; color: var(--ink); max-width: 62ch; }
+  p:last-child { margin-bottom: 0; }
+  .lede {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 20px;
+    line-height: 1.55;
+    color: var(--ink);
+  }
+
+  .abstract-box {
+    background: var(--bg-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+    padding: 28px 28px 8px;
+  }
+
+  ul, ol { padding-left: 22px; margin: 0 0 16px; }
+  li { margin-bottom: 8px; max-width: 60ch; }
+
+  code, .mono { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; }
+  code {
+    background: var(--tag-bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 15px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 500;
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+    color: var(--ink-faint);
+  }
+  td.num, th.num { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+  tr.win td { color: var(--ink); font-weight: 600; }
+
+  .chart-wrap {
+    margin: 28px 0 8px;
+    overflow-x: auto;
+  }
+  .chart-caption {
+    font-size: 14.5px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+    max-width: 60ch;
+  }
+
+  .tier-grid {
+    display: grid;
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .tier {
+    background: var(--bg-raised);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--amber);
+    border-radius: 2px;
+    padding: 16px 18px;
+  }
+  .tier.risk { border-left-color: #9C4A3E; }
+  .tier.blue { border-left-color: var(--blue); }
+  .tier h3 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13.5px;
+    font-weight: 500;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+  .tier p { margin: 0; font-size: 15px; color: var(--ink-soft); }
+
+  .limits-list li::marker { color: var(--amber); }
+
+  .credit-box {
+    background: var(--bg-raised);
+    border: 1px solid var(--hairline);
+    border-radius: 3px;
+    padding: 24px 28px;
+  }
+
+  footer {
+    padding: 40px 0 64px;
+    font-size: 14px;
+    color: var(--ink-faint);
+  }
+
+  @media (max-width: 560px) {
+    body { font-size: 16px; }
+    header.hero { padding: 44px 0 32px; }
+    section { padding: 34px 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">FlyRank ML Internship — Capstone Research Paper</p>
+    <h1>Which content pages lose search visibility first — and can a model queue them better than a hand-written rule?</h1>
+    <p class="byline">By Lokesh · <a href="https://github.com/lokeshp051/flyrank-ml-internship" target="_blank" rel="noopener">github.com/lokeshp051/flyrank-ml-internship</a></p>
+  </header>
+
+  <section id="abstract">
+    <span class="sec-num">Abstract</span>
+    <div class="abstract-box">
+      <p class="lede">A content reviewer can only check so many pages a week, so this paper asks a narrow question: given a page's first-half-of-month search signals, can a model rank which pages are declining better than a simple hand-written rule?</p>
+      <p>Using March 2026 daily search performance data from FlyRank's internship warehouse, joined against static content attributes, I built a transparent baseline (flag top-ranking pages with below-median click-through for their position) and compared it against a depth-limited Decision Tree trained on the same five knowable-in-advance features. On a client-grouped 80/20 split — so no client's pages appear in both train and test — the baseline wins narrowly at the very top of the queue (Precision@20: 0.55 vs 0.50), but the model pulls ahead once a reviewer can check deeper into the list (Precision@50: 0.64 vs 0.56; Precision@100: 0.68 vs 0.54). The result is a three-tier reason-coded queue meant to sit in front of a human reviewer, not replace one.</p>
+    </div>
+  </section>
+
+  <section id="intro">
+    <span class="sec-num">1 — Introduction</span>
+    <h2>The problem: limited eyes, too many pages</h2>
+    <p>A content team can review a handful of pages a week — not the whole site. The question isn't "is this page declining," which is easy to answer in hindsight; it's "which pages should a reviewer open first," which has to be answered before the decline is obvious to a human eye.</p>
+    <p>The decision this supports is concrete: a content reviewer starts each week with a ranked list and works down it until their time runs out. Getting the order right matters more than getting every page right, because the pages near the bottom of the list may never get looked at.</p>
+  </section>
+
+  <section id="data">
+    <span class="sec-num">2 — Data</span>
+    <h2>Source, window, and exclusions</h2>
+    <p>Data comes from the <strong>FlyRank Internship Warehouse Release (v20260703)</strong>, table <code>fact_content_daily_performance</code> (daily grain, partitioned by month), joined with <code>dim_content</code> for static page attributes.</p>
+    <p>The analysis window is <strong>March 2026</strong> (<code>month=2026-03</code>), a mid-panel month. June 2026, the final month in the release, is treated as a sealed test set and was deliberately not touched during this work.</p>
+    <p>Two things were excluded on purpose: <code>fact_content_query_90d</code> (query-level data, out of scope for a page-level decision) and the AI-referral columns, since a causal relationship between AI-referral volume and decline wasn't established going in.</p>
+    <p>All content and client identifiers in the warehouse are pseudonymized hashes. No raw client names, domains, or search queries appear anywhere in this analysis, the underlying notebooks, or this page.</p>
+  </section>
+
+  <section id="method">
+    <span class="sec-num">3 — Methodology</span>
+    <h2>Label, features, baseline, model, validation</h2>
+    <p><strong>Label (proxy).</strong> <code>is_declining_label</code> is set when a page's impressions in the second half of March are lower than in the first half. It's a within-month proxy, not a verified business outcome — flagged again in Limitations below.</p>
+    <p><strong>Features.</strong> Five signals, all knowable before the decision point since they're drawn only from the first half of the month: <code>impressions_h1</code>, <code>clicks_h1</code>, <code>avg_position_h1</code>, <code>ctr_h1</code>, and <code>word_count</code>.</p>
+    <p><strong>Baseline.</strong> A hand-written rule: flag any page ranking top-20 or better whose click-through rate sits below the median for its position bucket (<code>LOW_CTR_FOR_POSITION</code>). No model, no training — just a threshold a reviewer could compute in a spreadsheet.</p>
+    <p><strong>Model.</strong> A Decision Tree Classifier (<code>max_depth=4</code>, <code>class_weight="balanced"</code>) — kept shallow so it stays as readable as the baseline while combining more than one signal.</p>
+    <p><strong>Validation.</strong> A <code>GroupShuffleSplit</code> (80/20, grouped by client) — no client's pages appear in both the training and test sets, which simulates deploying the model against a client it has never seen.</p>
+    <p><strong>Leakage check.</strong> Confirmed no feature is a near-perfect stand-in for the label-generating column (second-half impressions). The highest correlation was <code>impressions_h1</code> at 0.83 — expected autocorrelation between a page's traffic in the two halves of a month, not leakage.</p>
+  </section>
+
+  <section id="results">
+    <span class="sec-num">4 — Results</span>
+    <h2>Model vs. baseline, same split</h2>
+    <p>Both scored on the identical client-grouped test set:</p>
+    <table>
+      <thead>
+        <tr><th>Precision at k</th><th class="num">Baseline (rule)</th><th class="num">Model (tree)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>k = 20</td><td class="num">0.55</td><td class="num">0.50</td></tr>
+        <tr class="win"><td>k = 50</td><td class="num">0.56</td><td class="num">0.64</td></tr>
+        <tr class="win"><td>k = 100</td><td class="num">0.54</td><td class="num">0.68</td></tr>
+      </tbody>
+    </table>
+
+    <div class="chart-wrap">
+      <svg viewBox="0 0 640 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Line chart of Precision at k for baseline rule versus model, k = 20, 50, 100" style="width:100%; height:auto; max-width:640px; font-family:'IBM Plex Mono',monospace;">
+        <!-- axes -->
+        <line x1="70" y1="20" x2="70" y2="270" stroke="var(--hairline)" stroke-width="1"/>
+        <line x1="70" y1="270" x2="600" y2="270" stroke="var(--hairline)" stroke-width="1"/>
+        <!-- y gridlines 0.4 to 0.8 -->
+        <g stroke="var(--hairline)" stroke-width="1" stroke-dasharray="2,4">
+          <line x1="70" y1="270" x2="600" y2="270"/>
+          <line x1="70" y1="207.5" x2="600" y2="207.5"/>
+          <line x1="70" y1="145" x2="600" y2="145"/>
+          <line x1="70" y1="82.5" x2="600" y2="82.5"/>
+          <line x1="70" y1="20" x2="600" y2="20"/>
+        </g>
+        <g fill="var(--ink-faint)" font-size="12">
+          <text x="58" y="274" text-anchor="end">0.40</text>
+          <text x="58" y="211.5" text-anchor="end">0.50</text>
+          <text x="58" y="149" text-anchor="end">0.60</text>
+          <text x="58" y="86.5" text-anchor="end">0.70</text>
+          <text x="58" y="24" text-anchor="end">0.80</text>
+        </g>
+        <!-- x labels: k=20 at x=140, k=50 at x=335, k=100 at x=530 -->
+        <g fill="var(--ink-faint)" font-size="12" text-anchor="middle">
+          <text x="140" y="294">k=20</text>
+          <text x="335" y="294">k=50</text>
+          <text x="530" y="294">k=100</text>
+        </g>
+        <!-- baseline: 0.55, 0.56, 0.54 -> y = 270 - (v-0.4)*625 -->
+        <polyline points="140,176.25 335,170 530,182.5" fill="none" stroke="var(--amber)" stroke-width="2.5"/>
+        <circle cx="140" cy="176.25" r="4.5" fill="var(--amber)"/>
+        <circle cx="335" cy="170" r="4.5" fill="var(--amber)"/>
+        <circle cx="530" cy="182.5" r="4.5" fill="var(--amber)"/>
+        <!-- model: 0.50, 0.64, 0.68 -->
+        <polyline points="140,207.5 335,120 530,95" fill="none" stroke="var(--blue)" stroke-width="2.5"/>
+        <circle cx="140" cy="207.5" r="4.5" fill="var(--blue)"/>
+        <circle cx="335" cy="120" r="4.5" fill="var(--blue)"/>
+        <circle cx="530" cy="95" r="4.5" fill="var(--blue)"/>
+        <!-- legend -->
+        <g font-size="13">
+          <line x1="420" y1="45" x2="440" y2="45" stroke="var(--amber)" stroke-width="2.5"/>
+          <text x="446" y="49" fill="var(--ink)">Baseline (CTR-vs-position rule)</text>
+          <line x1="420" y1="65" x2="440" y2="65" stroke="var(--blue)" stroke-width="2.5"/>
+          <text x="446" y="69" fill="var(--ink)">Model (Decision Tree)</text>
+        </g>
+      </svg>
+      <p class="chart-caption">The rule wins at the very top of the queue; the model pulls ahead once a reviewer can work deeper into it — a pattern that also showed up in an earlier toy example during Week 2 of the internship.</p>
+    </div>
+
+    <p>The model's split is dominated by one feature: <code>word_count</code> carries roughly 0.42 of total importance — more than <code>impressions_h1</code> (0.20), <code>ctr_h1</code> (0.18), <code>avg_position_h1</code> (0.15), and <code>clicks_h1</code> (0.06) combined. That's addressed directly in Limitations, since it wasn't a signal the baseline rule considered at all.</p>
+  </section>
+
+  <section id="limits">
+    <span class="sec-num">5 — Limitations &amp; honest framing</span>
+    <h2>What this work cannot claim</h2>
+    <ul class="limits-list">
+      <li>This is an <strong>observational, single-month</strong> analysis. Correlations here are not causal — nothing in this paper implies that changing a feature would change the outcome.</li>
+      <li>The label is a <strong>proxy</strong> (impressions dropped within the same month), not a verified downstream business outcome like lost revenue or churned traffic.</li>
+      <li><code>word_count</code>'s outsized importance (0.42) is unexpected and may reflect a correlated content-type effect — page template, content category — rather than a direct causal lever a writer can pull.</li>
+      <li>GA4 coverage in this slice is sparse (roughly 4% of rows), which limited how much cross-source (behavioral) features could be brought in.</li>
+      <li>Results are specific to this portfolio slice and this month. They should not be read as universal SEO claims, and haven't been tested against the sealed June 2026 window.</li>
+    </ul>
+  </section>
+
+  <section id="recs">
+    <span class="sec-num">6 — Ranked recommendations</span>
+    <h2>What a reviewer does with this</h2>
+    <p>The model plus a reason-code layer sorts flagged pages into three tiers. All three require a human to look before anything happens — nothing here is meant to auto-publish or auto-delete a page.</p>
+    <div class="tier-grid">
+      <div class="tier risk">
+        <h3>HIGH_RISK_LOW_CTR</h3>
+        <p>Urgent refresh and snippet rewrite — declining pages with a click-through problem specifically, where the title/snippet is the likely lever.</p>
+      </div>
+      <div class="tier risk">
+        <h3>HIGH_RISK_GENERAL</h3>
+        <p>Scheduled content refresh — declining pages without a clean single cause; needs an editorial look, not just a snippet edit.</p>
+      </div>
+      <div class="tier blue">
+        <h3>LOW_CTR_FOR_POSITION</h3>
+        <p>Title/snippet review — pages that aren't yet flagged as declining but are underperforming their position, worth a lower-urgency look.</p>
+      </div>
+    </div>
+    <p><strong>Monitoring.</strong> Track real impression change 30 and 60 days after any action, against a matched control group of similar pages that weren't touched. Retrain the model if Precision@50 drops meaningfully below 0.64 on fresh data, or on a quarterly cadence regardless.</p>
+  </section>
+
+  <section id="repro">
+    <span class="sec-num">7 — Reproducibility</span>
+    <h2>Rerun this from a fresh clone</h2>
+    <p>Everything above is generated from notebooks in the public repo, run in order Question → Data → Methodology → Results → Limitations → Recommendations.</p>
+    <ul>
+      <li>Capstone notebook: <a href="https://github.com/lokeshp051/flyrank-ml-internship/blob/main/work/notebooks/capstone.ipynb" target="_blank" rel="noopener"><code>work/notebooks/capstone.ipynb</code></a></li>
+      <li>Model training notebook: <a href="https://github.com/lokeshp051/flyrank-ml-internship/blob/main/work/notebooks/w05_model.ipynb" target="_blank" rel="noopener"><code>work/notebooks/w05_model.ipynb</code></a></li>
+      <li>Baseline notebook: <a href="https://github.com/lokeshp051/flyrank-ml-internship/blob/main/work/notebooks/w04_baseline_score.ipynb" target="_blank" rel="noopener"><code>work/notebooks/w04_baseline_score.ipynb</code></a></li>
+      <li>Full repository: <a href="https://github.com/lokeshp051/flyrank-ml-internship" target="_blank" rel="noopener">github.com/lokeshp051/flyrank-ml-internship</a></li>
+    </ul>
+    <p>Both the client-grouped train/test split and the Decision Tree are seeded with <code>random_state=42</code> for a deterministic rerun. Core dependencies are pinned in <code>requirements.txt</code> (<code>pandas</code>, <code>numpy</code>, <code>scikit-learn</code>, <code>duckdb</code>, <code>matplotlib</code>); the warehouse itself is queried directly from Hugging Face via DuckDB, so no local data download is required to reproduce the numbers above.</p>
+  </section>
+
+  <section id="credit">
+    <span class="sec-num">8 — Acknowledgments &amp; data credit</span>
+    <div class="credit-box">
+      <p>Built on the FlyRank ML Internship dataset — <a href="https://flyrank.ai" target="_blank" rel="noopener">flyrank.ai</a>.</p>
+    </div>
+  </section>
+
+  <footer>
+    <p>Lokesh — FlyRank AI ML Internship, Machine Learning track. Capstone, Week 8.</p>
+  </footer>
+
+</div>
+</body>
+</html>
